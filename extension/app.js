@@ -1,58 +1,48 @@
 /**
- * Goes up in the nodelist until it finds a link and returns it.
+ * Recursively traverses the DOM tree to locate the nearest anchor element with a valid `href` attribute.
+ * This ensures that clicks on nested elements (e.g., <code> inside <a>) still resolve to a proper link.
  *
- * This is a recursive function to make sure to handle the
- * `href` attribute of the real link.
- *
- * Example:
- * <a href="#"><code>HTMLAnchorElement</code></a>
- *
- * In this case, the `code` node doesn't have a `href` attribute
- * so it needs to fall back to `a`.
- *
- * @param {object} node The node to get the link from
- * @returns {object} the first node having a `href` property, `undefined` if none
+ * @param {Node} node - The starting node for traversal.
+ * @returns {HTMLAnchorElement | undefined} - The nearest anchor element with a valid `href`, or `undefined` if none found.
  */
-const getLink = node => {
-  if (!node) {
-    return undefined
+const getLink = (node) => {
+  while (node && node !== document) {
+    if (node.tagName === 'A' && node.href) return node;
+    node = node.parentNode;
   }
-
-  return node.href ? node : getLink(node.parentNode)
-}
+  return undefined;
+};
 
 /**
- * Dispatches the action to event listeners in the background.
+ * Handles Shift+Alt+Click events to open links exclusively in incognito mode while blocking default tab opening.
+ * Implements deep event suppression to override Chrome’s built-in behavior at the highest priority.
  *
- * Fired if the node is clicked pressing the correct key combinaison
- * and is a link.
- * See https://github.com/francoischalifour/incognito-link#usage
- *
- * @param {object} e The event
+ * @param {MouseEvent} event - The click event.
  */
-const onClick = e => {
-  if (!e.shiftKey || !e.altKey) {
-    return
-  }
+const onClick = (event) => {
+  if (!(event.shiftKey && event.altKey)) return; // Only trigger on Shift+Alt+Click
+  
+  const link = getLink(event.target);
+  if (!link) return;
+  
+  // Prevent ALL possible event bubbling, capturing, and propagation
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
 
-  const link = getLink(e.target)
+  // Override Chrome’s Shift+Click new tab behavior by delaying execution
+  requestAnimationFrame(() => {
+    chrome.runtime.sendMessage({
+      action: 'CREATE_INCOGNITO_WINDOW',
+      url: link.href
+    });
+  });
+};
 
-  if (!link) {
-    return
-  }
-
-  e.preventDefault()
-
-  chrome.runtime.sendMessage({
-    action: 'CREATE_INCOGNITO_WINDOW',
-    url: link.href
-  })
-}
-
-/*
- * Binds the listener on the document object to intercept any links
- * added in the future.
+/**
+ * Sets up an event listener with the highest interception priority to ensure maximum control.
+ * Ensures all future dynamically added links are also captured in real time.
  */
 document.addEventListener('DOMContentLoaded', () => {
-  document.body.addEventListener('click', onClick)
-})
+  document.documentElement.addEventListener('click', onClick, { capture: true, passive: false });
+});
