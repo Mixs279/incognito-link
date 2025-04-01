@@ -1,58 +1,107 @@
 /**
- * Goes up in the nodelist until it finds a link and returns it.
- *
- * This is a recursive function to make sure to handle the
- * `href` attribute of the real link.
- *
- * Example:
- * <a href="#"><code>HTMLAnchorElement</code></a>
- *
- * In this case, the `code` node doesn't have a `href` attribute
- * so it needs to fall back to `a`.
- *
- * @param {object} node The node to get the link from
- * @returns {object} the first node having a `href` property, `undefined` if none
+ * Ultimate Incognito Tab Opener (Friendly Edition)
+ * ------------------------------------------------
+ * Hey friend! This little script is here to help you open links in incognito mode only,
+ * without Chrome opening an extra, unwanted tab. It listens for when you press Shift+Alt
+ * while clicking a link, and then it works its magic to only open one incognito tab—no duplicates!
+ * 
+ * We know browser shortcuts can be stubborn, so this script uses every trick we know to stop the
+ * default behavior and give you a smooth incognito experience.
  */
-const getLink = node => {
-  if (!node) {
-    return undefined
-  }
-
-  return node.href ? node : getLink(node.parentNode)
-}
 
 /**
- * Dispatches the action to event listeners in the background.
+ * This function walks up the DOM tree to find the closest <a> tag that has a link (href).
+ * It’s like playing detective to find the real link you meant to click.
  *
- * Fired if the node is clicked pressing the correct key combinaison
- * and is a link.
- * See https://github.com/francoischalifour/incognito-link#usage
+ * @param {Node} node - The starting point (where you clicked).
+ * @returns {HTMLAnchorElement | undefined} - The found link, or undefined if nothing’s found.
+ */
+const getLink = (node) => {
+	while (node && node !== document) {
+		if (node.tagName === 'A' && node.href) return node;
+		node = node.parentNode;
+	}
+	return undefined;
+};
+
+// A little flag to make sure we don't open more than one incognito tab by accident.
+let incognitoTabOpened = false;
+// How long we wait (in milliseconds) before we let you open another tab.
+const DEBOUNCE_TIMEOUT = 300;
+
+/**
+ * This function is our superhero. It stops Chrome's usual behavior when you press Shift+Alt,
+ * and it makes sure only one incognito tab opens for each click.
  *
- * @param {object} e The event
+ * @param {Event} event - The event that happens when you click.
  */
-const onClick = e => {
-  if (!e.shiftKey || !e.altKey) {
-    return
-  }
+const handleUltimateEvent = (event) => {
+	// If you’re holding Shift, we step in immediately.
+	if (event.shiftKey) {
+		// We stop everything right here to prevent any normal tab opening.
+		event.preventDefault();
+		event.stopPropagation();
+		event.stopImmediatePropagation();
+		event.cancelBubble = true;
+	}
 
-  const link = getLink(e.target)
+	// Now, if you're holding both Shift and Alt, let's get to work.
+	if (event.shiftKey && event.altKey) {
+		// If we already opened a tab, we don't want to do it again.
+		if (incognitoTabOpened) return;
+		incognitoTabOpened = true;
 
-  if (!link) {
-    return
-  }
+		const link = getLink(event.target);
+		if (link) {
+			// We use a microtask (Promise) to schedule our incognito-opening action just after the native stuff.
+			Promise.resolve().then(() => {
+				chrome.runtime.sendMessage({
+					action: 'CREATE_INCOGNITO_WINDOW',
+					url: link.href
+				});
+			});
+		}
 
-  e.preventDefault()
+		// After a short wait, we reset our flag so you can open more tabs later.
+		setTimeout(() => {
+			incognitoTabOpened = false;
+		}, DEBOUNCE_TIMEOUT);
+	}
+};
 
-  chrome.runtime.sendMessage({
-    action: 'CREATE_INCOGNITO_WINDOW',
-    url: link.href
-  })
-}
+// These are the events we’re watching—every little click or key press that might trigger a tab.
+const eventsToIntercept = [
+	'pointerdown',
+	'mousedown',
+	'mouseup',
+	'click',
+	'beforeinput',
+	'keydown', // Just in case keyboard events join the party.
+	'keyup'
+];
 
-/*
- * Binds the listener on the document object to intercept any links
- * added in the future.
- */
-document.addEventListener('DOMContentLoaded', () => {
-  document.body.addEventListener('click', onClick)
-})
+// We attach our superhero function to each event at the very highest level.
+// This means we're trying really hard to catch every possible trigger before the browser does.
+eventsToIntercept.forEach((evName) => {
+	document.addEventListener(evName, handleUltimateEvent, {
+		capture: true,
+		passive: false
+	});
+});
+
+// Just in case the page changes or new content pops in, we watch the whole document.
+// If things change, we reapply our event listeners to keep our magic alive.
+new MutationObserver(() => {
+	eventsToIntercept.forEach((evName) => {
+		document.documentElement.removeEventListener(evName, handleUltimateEvent, {
+			capture: true
+		});
+		document.documentElement.addEventListener(evName, handleUltimateEvent, {
+			capture: true,
+			passive: false
+		});
+	});
+}).observe(document.documentElement, {
+	childList: true,
+	subtree: true
+});
