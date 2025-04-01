@@ -1,5 +1,4 @@
 /**
- * Ultimate Incognito Tab Opener (Friendly Edition)
  * ------------------------------------------------
  * Hey friend! This little script is here to help you open links in incognito mode only,
  * without Chrome opening an extra, unwanted tab. It listens for when you press Shift+Alt
